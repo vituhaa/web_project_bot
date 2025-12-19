@@ -6,6 +6,28 @@ const REGISTER_URL = 'http://localhost:3000/api/telegram/register'
 const LOGIN_URL = 'http://localhost:3000/api/telegram/login'
 const BOARDS_URL = 'http://localhost:3000/api/boards'
 
+type BoardMemberDto = {
+  userId: number;
+  role: 'ADMIN' | 'MEMBER';
+  user: {
+    id: number;
+    name: string;
+  };
+  isCurrentUser: boolean;
+};
+
+export type TaskDto = {
+  id?: number;
+  title: string;
+  description: string | null;
+  status: 'TODO' | 'IN_PROGRESS' | 'DONE';
+  createdBy?: {
+    id: number;
+    name: string;
+  };
+};
+
+
 const reg_data = new Map<number, {step: 'name' | 'password' | 'confirm';
   name?:string;
   password?:string;
@@ -328,73 +350,88 @@ bot.on('text', async (ctx) => {
       board_number_choose.delete(user_id);
       userBoardsData.delete(user_id);
 
-      try
-      {
-        await ctx.reply(`Загрузка информации о доске `);
+try {
+    await ctx.reply('Загружаю данные доски…');
 
-        const response = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${session.token}`
-          },
-        });
+    const headers = {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${session.token}`,
+    };
 
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => '');
-          await ctx.reply(`Ошибка при загрузке доски: ${response.status} ${errorText}`);
-          return;
-        }
-
-        const boardDetails = await response.json() as {
-          name?: string;
-          tasks?: Array<{
-            title: string;
-            description?: string;
-            status?: string;
-            assignedTo?: { name?: string };
-          }>;
-          members?: Array<{
-            role: string;
-            user: { name: string };
-          }>;
-        };
-
-        let boardMessage = `**Доска: ${boardDetails.name || 'Без названия'}**\n\n`;
-
-        if (boardDetails.tasks && Array.isArray(boardDetails.tasks)) {
-          boardMessage += `\n *Задачи в доске (${boardDetails.tasks.length}):*\n`;
-        
-          if (boardDetails.tasks.length > 0) {
-            boardDetails.tasks.forEach((task, index) => {
-              boardMessage += `\n${index + 1}. ${task.title}`;
-            
-              if (task.description)
-              {
-                const shortDesc = task.description.length > 50 ? 
-                  task.description.substring(0, 50) + '...' : task.description;
-                boardMessage += `\n    ${shortDesc}`;
-              }
-            
-              if (task.assignedTo?.name) {
-                boardMessage += `\n   Назначено: ${task.assignedTo.name}`;
-              }
-            });
-          } else {
-            boardMessage += `\nЗадач пока нет.`;
-          }
-        }
-
-        await ctx.reply(boardMessage, { parse_mode: 'Markdown' });
-
-      } 
-      catch (error) {
-        console.error("Error loading board details:", error);
-        await ctx.reply('Произошла ошибка при загрузке информации о доске.');
-      }
-    
+    /** 1. Доска */
+    const boardRes = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, { headers });
+    if (!boardRes.ok) {
+      await ctx.reply(`Ошибка загрузки доски (${boardRes.status})`);
       return;
+    }
+    const board = await boardRes.json() as {
+      id: number;
+      name: string;
+      createdAt: string;
+    };
+
+    /** 2. Задачи */
+    const tasksRes = await fetch(
+      `${BOARDS_URL}/${selectedBoard.id}/tasks`,
+      { headers }
+    );
+
+let tasks: TaskDto[] = [];
+if (tasksRes.ok) {
+  tasks = (await tasksRes.json()) as TaskDto[];
+}
+
+
+    /** 3. Участники (опционально) */
+    const membersRes = await fetch(
+      `${BOARDS_URL}/${selectedBoard.id}/members`,
+      { headers }
+    );
+
+let members: BoardMemberDto[] = [];
+if (membersRes.ok) {
+  members = (await membersRes.json()) as BoardMemberDto[];
+}
+
+    /** Формирование сообщения */
+    let message = `*Доска:* ${board.name}\n`;
+
+    if (members.length > 0) {
+      message += `\n*Участники (${members.length}):*\n`;
+      members.forEach(m => {
+        message += `• ${m.user.name} (${m.role})\n`;
+      });
+    }
+
+    message += `\n*Задачи (${tasks.length}):*\n`;
+
+    if (tasks.length === 0) {
+      message += '— задач пока нет\n';
+    } else {
+      tasks.forEach((task, i) => {
+        message += `\n${i + 1}. ${task.title}`;
+        if (task.status) message += ` [${task.status}]`;
+        if (task.description) {
+          const short = task.description.length > 50
+            ? task.description.slice(0, 50) + '…'
+            : task.description;
+          message += `\n   ${short}`;
+        }
+        if (task.createdBy?.name) {
+          message += `\n   Назначено: ${task.createdBy.name}`;
+        }
+      });
+    }
+
+    await ctx.reply(message, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+    console.error('[BOT] load board error:', error);
+    await ctx.reply('Ошибка при загрузке данных доски.');
   }
+
+  return;
+}
 });
 
 
