@@ -17,11 +17,19 @@ const log_data = new Map<number, {step: 'name' | 'password' | 'confirm';
   password?:string;
 }>();
 
+
 const loggedInUsers = new Map<number, {
   name?:string;
   token?: string;
 }>();
 
+
+// const board_number_choose = new Map<number, {name?:string;}>();
+
+const board_number_choose = new Map<number, { 
+  boards: Array<{ id: string; name: string }>;
+  step: 'awaiting_selection';
+}>();
 
 // команда /start
 bot.start(async (ctx) => {
@@ -31,7 +39,9 @@ bot.start(async (ctx) => {
 
 // команда /help
 bot.help(async (ctx) => {
-  await ctx.reply('Доступные команды:\n/start - начать\n/help - помощь\n/registration - регистрация\n/log_in - вход\n/show_boards - посмотреть список досок');
+  await ctx.reply('Доступные команды:\n/start - начать\n/help - помощь\n/registration - регистрация\n/log_in - вход\n/show_boards - посмотреть список досок\n' +
+                  '/open_board - для просмотра доски'
+  );
 });
 
 
@@ -94,118 +104,54 @@ bot.command('show_boards', async (ctx) => {
 });
 
 
-// // команда /show_role
-// bot.command('show_role', async (ctx) => {
-//   const user_id = ctx.from.id;
 
-//   if (!loggedInUsers.has(user_id)) {
-//     return ctx.reply('Войдите /log_in или зарегистрируйтесь /registration.');
-//   }
+// команда /open_board - ЗАГЛУШКА
+bot.command('open_board', async (ctx) => {
+  const user_id = ctx.from.id;
+  const session = loggedInUsers.get(user_id);
+  if (!session?.token) {
+    return ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра');
+  }
 
-//   const user = loggedInUsers.get(user_id);
+  try {
+    const response = await fetch(BOARDS_URL, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${session.token}`
+      },
+    });
 
-//   const response = await fetch(BOARDS_URL, {
-//     method: 'GET',
-//     headers: {
-//       'Accept': 'application/json',
-//     },
-//   });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return ctx.reply(`Ошибка: ${response.status} ${text}`);
+    }
 
+    type Board = { id: string; name: string };
+    const boards = (await response.json()) as Board[];
 
-//   if (!response.ok) {
-//     const text = await response.text().catch(() => '');
-//     return ctx.reply(`Ошибка API: ${response.status} ${text}`);
-//   }
+    if (boards.length === 0) {
+      return ctx.reply('У вас пока нет досок.');
+    }
 
-//   const data: any = await response.json();
-//   const boards = Array.isArray(data) ? data : (data?.boards ?? []);
+    let message = `Ваши доски (${boards.length}):\n\n`;
 
-//   if (boards.length === 0) {
-//     return ctx.reply('Досок нет, роль определить не могу.');
-//   }
+    boards.forEach((board, index) => {
+      message += `${index + 1}. ${board.name}\n`;
+    });
 
-//   const members = boards[0].members ?? boards[0].participants ?? [];
+    board_number_choose.set(user_id, {
+      boards: boards,
+      step: 'awaiting_selection'
+    });
 
-//   const me = members.find((m: any) =>
-//     m.telegramId === user_id || m.user?.telegramId === user_id
-//   );
-
-
-//   // пробуем оба варианта:
-//   const role = me?.user?.role ?? me?.role;
-
-//   return ctx.reply(`Ваша роль: ${role ?? 'не найдена в ответе /api/boards'}`);
-// });
-
-
-
-// // команда /open_board - ЗАГЛУШКА
-// bot.command('open_board', async (ctx) => {
-//   const user_id = ctx.from.id;
-//   if (loggedInUsers.has(user_id)) 
-//   {
-//     const user = loggedInUsers.get(user_id);
-    
-//     await ctx.reply('Вот задачи доски: \n');
-//     const parts = ctx.message?.text?.trim().split(/\s+/) ?? [];
-//     const board_id = parts[1];
-//     const TASKS_URL = BOARDS_URL + board_id.toString();
-//     const response = await fetch(TASKS_URL, {
-//       method: 'GET',
-//       headers: {
-//         'Accept': 'application/json'
-//       },
-//     });
-
-//     if (!response.ok)
-//     {
-//       const text = await response.text().catch(() => '');
-//       return ctx.reply(`Ошибка API: ${response.status} ${text}`);
-//     }
-
-//     type Board = {
-//       name: string;
-//       createdAt: string;
-//       updatedAt: string;
-//       members?: any[];
-//       tasks?: any[];
-//     };
-
-//     const board = (await response.json()) as Board;
-//     if (!board) return ctx.reply('Доска не найдена.');
-
-//     const members = board.members ?? [];
-//     const tasks = board.tasks ?? [];
-
-//     const membersText =
-//       members.length === 0
-//         ? '—'
-//         : members.map((m: any) => m.name ?? m.user?.name ?? m.userId ?? m.id).join(', ');
-
-//     await ctx.reply(
-//       `name: ${board.name}\n` +
-//       `createdAt: ${board.createdAt}\n` +
-//       `updatedAt: ${board.updatedAt}\n` +
-//       `members: ${membersText}\n` +
-//       `tasks: ${tasks.length}`
-//     );
-
-//     if (tasks.length === 0) return ctx.reply('Задач на этой доске пока нет.');
-
-//     const tasksText = tasks
-//       .map((t: any, i: number) =>
-//         `${i + 1}) ${t.name ?? t.title ?? 'Без названия'} ` +
-//         `(createdAt: ${t.createdAt ?? '—'}, updatedAt: ${t.updatedAt ?? '—'})`
-//       )
-//       .join('\n');
-
-//     return ctx.reply(tasksText);
-//   } 
-//   else 
-//   {
-//     await ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра: ');
-//   }
-// });
+    return ctx.reply(message + `Выберите номер доски, которую хотите открыть (1 - ${boards.length}): `);
+  } 
+  catch (error) {
+    console.error("Error fetching boards:", error);
+    return ctx.reply('Произошла ошибка при получении досок.');
+  }
+});
 
 
 bot.on('text', async (ctx) => {
@@ -342,6 +288,99 @@ bot.on('text', async (ctx) => {
           log_data.delete(user_id);
           break;
     }
+  }
+
+  const board_number = board_number_choose.get(user_id);
+  if (board_number && board_number.step === 'awaiting_selection') {
+    const text = ctx.message.text.trim();
+    const selectedNumber = parseInt(text);
+    const session = loggedInUsers.get(user_id);
+    
+    if (!session?.token) {
+      await ctx.reply('Сессия истекла. Войдите снова: /log_in');
+      board_number_choose.delete(user_id);
+      return;
+    }
+
+    if (isNaN(selectedNumber)) {
+      await ctx.reply('Пожалуйста, введите номер доски цифрами.');
+      return;
+    }
+
+    if (selectedNumber < 1 || selectedNumber > board_number.boards.length) {
+      await ctx.reply(`Номер доски должен быть от 1 до ${board_number.boards.length}. Попробуйте снова:`);
+      return;
+    }
+    const selectedBoard = board_number.boards[selectedNumber - 1];
+    
+    board_number_choose.delete(user_id);
+
+    try
+    {
+      await ctx.reply(`Загрузка информации о доске "${selectedBoard.name}"...`);
+
+      const response = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${session.token}`
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        await ctx.reply(`Ошибка при загрузке доски: ${response.status} ${errorText}`);
+        return;
+      }
+
+      const boardDetails = await response.json() as {
+        name?: string;
+        tasks?: Array<{
+          title: string;
+          description?: string;
+          status?: string;
+          assignedTo?: { name?: string };
+        }>;
+        members?: Array<{
+          role: string;
+          user: { name: string };
+        }>;
+      };
+
+      let boardMessage = `**Доска: ${boardDetails.name || 'Без названия'}**\n\n`;
+
+      if (boardDetails.tasks && Array.isArray(boardDetails.tasks)) {
+        boardMessage += `\n *Задачи в доске (${boardDetails.tasks.length}):*\n`;
+        
+        if (boardDetails.tasks.length > 0) {
+          boardDetails.tasks.forEach((task, index) => {
+            boardMessage += `\n${index + 1}. ${task.title}`;
+            
+            if (task.description)
+            {
+              const shortDesc = task.description.length > 50 ? 
+                task.description.substring(0, 50) + '...' : task.description;
+              boardMessage += `\n    ${shortDesc}`;
+            }
+            
+            if (task.assignedTo?.name) {
+              boardMessage += `\n   Назначено: ${task.assignedTo.name}`;
+            }
+          });
+        } else {
+          boardMessage += `\nЗадач пока нет.`;
+        }
+      }
+
+      await ctx.reply(boardMessage, { parse_mode: 'Markdown' });
+
+    } 
+    catch (error) {
+      console.error("Error loading board details:", error);
+      await ctx.reply('Произошла ошибка при загрузке информации о доске.');
+    }
+    
+    return;
   }
 });
 
