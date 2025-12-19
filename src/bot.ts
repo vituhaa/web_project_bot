@@ -56,7 +56,7 @@ bot.command('show_boards', async (ctx) => {
   const user_id = ctx.from.id;
   const session = loggedInUsers.get(user_id);
   if (!session?.token) {
-    return ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра: ');
+    return ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра');
   }
 
   try {
@@ -73,14 +73,20 @@ bot.command('show_boards', async (ctx) => {
       return ctx.reply(`Ошибка: ${response.status} ${text}`);
     }
 
-    type Board = { id: string; title: string };
+    type Board = { id: string; name: string };
     const boards = (await response.json()) as Board[];
 
     if (boards.length === 0) {
       return ctx.reply('У вас пока нет досок.');
     }
 
-    return ctx.reply(`Доски есть: ${boards.length}`);
+    let message = `Ваши доски (${boards.length}):\n\n`;
+
+    boards.forEach((board, index) => {
+      message += `${index + 1}. ${board.name}\n`;
+    });
+
+    return ctx.reply(message);
   } catch (error) {
     console.error("Error fetching boards:", error);
     return ctx.reply('Произошла ошибка при получении досок.');
