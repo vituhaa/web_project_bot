@@ -407,31 +407,64 @@ bot.on('text', async (ctx) => {
                 })
               });
   
-              if (response.ok)
-              {
-                // const result = (await response.json()) as { telegramToken: string };
-                /////////////////////////////////////////
-                /////////////////////////////////////////
-                const result = await response.json() as { 
-                  id?: number; 
-                  name?: string; 
-                  token?: string;
-                  role?: UserRole; // API должен возвращать роль
-                };
-                /////////////////////////////////////////
-                /////////////////////////////////////////
-                await ctx.reply('Вход завершен успешно!');
-                // loggedInUsers.set(user_id, { name: user_log_data.name, token: result.telegramToken });
+              // if (response.ok)
+              // {
+              //   // const result = (await response.json()) as { telegramToken: string };
+              //   /////////////////////////////////////////
+              //   /////////////////////////////////////////
+              //   const result = await response.json() as { 
+              //     id?: number; 
+              //     name?: string; 
+              //     token?: string;
+              //     role?: UserRole; // API должен возвращать роль
+              //   };
+              //   /////////////////////////////////////////
+              //   /////////////////////////////////////////
+              //   await ctx.reply('Вход завершен успешно!');
+              //   // loggedInUsers.set(user_id, { name: user_log_data.name, token: result.telegramToken });
 
-                /////////////////////////////////////////
-                /////////////////////////////////////////
+              //   /////////////////////////////////////////
+              //   /////////////////////////////////////////
+              //   loggedInUsers.set(user_id, {
+              //     name: user_log_data.name,
+              //     token: result.token || '',
+              //     role: result.role || 'viewer' // по умолчанию viewer
+              //   });
+              //   /////////////////////////////////////////
+              //   /////////////////////////////////////////
+              // }
+              if (response.ok) {
+                const responseText = await response.text();
+                console.log('Login response text:', responseText);
+                
+                let result;
+                try {
+                  result = JSON.parse(responseText);
+                  console.log('Parsed login result:', result);
+                } catch (e) {
+                  console.error('Failed to parse login response as JSON:', e);
+                  await ctx.reply('Ошибка: неверный формат ответа от сервера');
+                  return;
+                }
+                
+                const token = result.token || result.accessToken || result.telegramToken || result.jwt;
+                console.log('Extracted token:', token ? token.substring(0, 20) + '...' : 'NOT FOUND');
+                
+                if (!token) {
+                  console.log('Full response object:', result);
+                  await ctx.reply('Ошибка: токен не найден в ответе сервера');
+                  return;
+                }
+                
+                await ctx.reply('Вход завершен успешно!');
+                
                 loggedInUsers.set(user_id, {
                   name: user_log_data.name,
-                  token: result.token || '',
-                  role: result.role || 'viewer' // по умолчанию viewer
+                  token: token,
+                  role: result.role || 'viewer'
                 });
-                /////////////////////////////////////////
-                /////////////////////////////////////////
+                
+                console.log('Session saved for user:', user_id, 'Token set:', !!token);
               }
               else
               {
