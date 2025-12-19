@@ -63,6 +63,7 @@ const loggedInUsers = new Map<number, {
 
 const userBoardsData = new Map<number, Map<number, {id: string}>>();
 const board_number_choose = new Map<number, {step: 'number'; number?:string;}>();
+const board_number_choose_delete = new Map<number, {step: 'number_delete'; number?:string;}>();
 
 // команда /start
 bot.start(async (ctx) => {
@@ -73,7 +74,7 @@ bot.start(async (ctx) => {
 // команда /help
 bot.help(async (ctx) => {
   await ctx.reply('Доступные команды:\n/start - начать\n/help - помощь\n/registration - регистрация\n/log_in - вход\n/show_boards - посмотреть список досок\n' +
-                  '/open_board - для просмотра доски\n/create_board - создать доску'
+                  '/open_board - для просмотра доски\n/create_board - создать доску\n/delete_board - удалить доску'
   );
 });
 
@@ -112,6 +113,55 @@ bot.command('create_board', async (ctx) => {
 });
 //////////////////////////////////////////////////////
 //////////////////////////////////////////////////////
+
+// команда /delete_board - удалить доску
+bot.command('delete_board', async (ctx) => {
+  const user_id = ctx.from.id;
+  const session = loggedInUsers.get(user_id);
+  if (!session?.token) {
+    return ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра');
+  }
+
+  try {
+    const response = await fetch(BOARDS_URL, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${session.token}`
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return ctx.reply(`Ошибка: ${response.status} ${text}`);
+    }
+
+    type Board = { id: string; name: string };
+    const boards = (await response.json()) as Board[];
+
+    if (boards.length === 0) {
+      return ctx.reply('У вас пока нет досок.');
+    }
+
+    let message = `Ваши доски (${boards.length}):\n\n`;
+    const userBoards = new Map<number, {id: string}>();
+
+    boards.forEach((board, index) => {
+      const boardNumber = index + 1;
+      message += `${boardNumber}. ${board.name}\n`;
+      userBoards.set(boardNumber, {id: board.id});
+    });
+
+    userBoardsData.set(user_id, userBoards);
+    board_number_choose_delete.set(user_id, {step:'number_delete'});
+
+    return ctx.reply(message + `Выберите номер доски, которую хотите удалить (1 - ${boards.length}): `);
+  } 
+  catch (error) {
+    console.error("Error fetching boards:", error);
+    return ctx.reply('Произошла ошибка при получении досок.');
+  }
+});
 
 // команда /show_boards
 bot.command('show_boards', async (ctx) => {
@@ -491,132 +541,211 @@ bot.on('text', async (ctx) => {
   }
 
   const board_number = board_number_choose.get(user_id);
-  if (!board_number)
+  if (board_number)
   {
-    return;
-  }
-  switch (board_number.step)
-  {
-    case 'number':
-      const userBoards = userBoardsData.get(user_id);
-      if (!userBoards) {
-        await ctx.reply('Данные о досках не найдены. Попробуйте снова: /open_board');
-        board_number_choose.delete(user_id);
-        return;
-      }
-      const selectedNumber = parseInt(text);
-      const session = loggedInUsers.get(user_id);
-    
-      if (!session?.token) {
-        await ctx.reply('Сессия истекла. Войдите снова: /log_in');
-        board_number_choose.delete(user_id);
-        return;
-      }
-
-      if (isNaN(selectedNumber)) {
-        await ctx.reply('Пожалуйста, введите номер доски цифрами.');
-        return;
-      }
-
-      if (selectedNumber < 1 || selectedNumber > userBoards.size) {
-        await ctx.reply(`Номер доски должен быть от 1 до ${userBoards.size}. Попробуйте снова:`);
-        return;
-      }
-      const selectedBoard = userBoards.get(selectedNumber);
-      if (!selectedBoard) {
-        await ctx.reply('Ошибка: не удалось найти выбранную доску.');
-        board_number_choose.delete(user_id);
-        userBoardsData.delete(user_id);
-        return;
-      }
-    
-      board_number_choose.delete(user_id);
-      userBoardsData.delete(user_id);
-
-      try {
-        await ctx.reply('Загружаю данные доски…');
-
-        const headers = {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${session.token}`,
-        };
-
-        /** 1. Доска */
-        const boardRes = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, { headers });
-        if (!boardRes.ok) {
-          await ctx.reply(`Ошибка загрузки доски (${boardRes.status})`);
+    switch (board_number.step)
+    {
+      case 'number':
+        const userBoards = userBoardsData.get(user_id);
+        if (!userBoards) {
+          await ctx.reply('Данные о досках не найдены. Попробуйте снова: /open_board');
+          board_number_choose.delete(user_id);
           return;
         }
-        const board = await boardRes.json() as {
-          id: number;
-          name: string;
-          createdAt: string;
-        };
-
-        /** 2. Задачи */
-        const tasksRes = await fetch(
-          `${BOARDS_URL}/${selectedBoard.id}/tasks`,
-          { headers }
-        );
-
-        let tasks: TaskDto[] = [];
-        if (tasksRes.ok) {
-          tasks = (await tasksRes.json()) as TaskDto[];
+        const selectedNumber = parseInt(text);
+        const session = loggedInUsers.get(user_id);
+      
+        if (!session?.token) {
+          await ctx.reply('Сессия истекла. Войдите снова: /log_in');
+          board_number_choose.delete(user_id);
+          return;
         }
 
-
-        /** 3. Участники (опционально) */
-        const membersRes = await fetch(
-          `${BOARDS_URL}/${selectedBoard.id}/members`,
-          { headers }
-        );
-
-        let members: BoardMemberDto[] = [];
-        if (membersRes.ok) {
-          members = (await membersRes.json()) as BoardMemberDto[];
+        if (isNaN(selectedNumber)) {
+          await ctx.reply('Пожалуйста, введите номер доски цифрами.');
+          return;
         }
 
-        /** Формирование сообщения */
-        let message = `*Доска:* ${board.name}\n`;
-
-        if (members.length > 0) {
-          message += `\n*Участники (${members.length}):*\n`;
-          members.forEach(m => {
-            message += `• ${m.user.name} (${m.role})\n`;
-          });
+        if (selectedNumber < 1 || selectedNumber > userBoards.size) {
+          await ctx.reply(`Номер доски должен быть от 1 до ${userBoards.size}. Попробуйте снова:`);
+          return;
         }
-
-        message += `\n*Задачи (${tasks.length}):*\n`;
-
-        if (tasks.length === 0) {
-          message += '— задач пока нет\n';
-        } else {
-          tasks.forEach((task, i) => {
-            message += `\n${i + 1}. ${task.title}`;
-            if (task.status) message += ` [${task.status}]`;
-            if (task.description) {
-              const short = task.description.length > 50
-                ? task.description.slice(0, 50) + '…'
-                : task.description;
-              message += `\n   ${short}`;
-            }
-            if (task.createdBy?.name) {
-              message += `\n   Назначено: ${task.createdBy.name}`;
-            }
-          });
+        const selectedBoard = userBoards.get(selectedNumber);
+        if (!selectedBoard) {
+          await ctx.reply('Ошибка: не удалось найти выбранную доску.');
+          board_number_choose.delete(user_id);
+          userBoardsData.delete(user_id);
+          return;
         }
+      
+        board_number_choose.delete(user_id);
+        userBoardsData.delete(user_id);
 
-        await ctx.reply(message, { parse_mode: 'Markdown' });
+        try {
+          await ctx.reply('Загружаю данные доски…');
 
-      } 
-      catch (error) {
-        console.error('[BOT] load board error:', error);
-        await ctx.reply('Ошибка при загрузке данных доски.');
-      }  
-      break;
+          const headers = {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${session.token}`,
+          };
+
+          /** 1. Доска */
+          const boardRes = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, { headers });
+          if (!boardRes.ok) {
+            await ctx.reply(`Ошибка загрузки доски (${boardRes.status})`);
+            return;
+          }
+          const board = await boardRes.json() as {
+            id: number;
+            name: string;
+            createdAt: string;
+          };
+
+          /** 2. Задачи */
+          const tasksRes = await fetch(
+            `${BOARDS_URL}/${selectedBoard.id}/tasks`,
+            { headers }
+          );
+
+          let tasks: TaskDto[] = [];
+          if (tasksRes.ok) {
+            tasks = (await tasksRes.json()) as TaskDto[];
+          }
+
+
+          /** 3. Участники (опционально) */
+          const membersRes = await fetch(
+            `${BOARDS_URL}/${selectedBoard.id}/members`,
+            { headers }
+          );
+
+          let members: BoardMemberDto[] = [];
+          if (membersRes.ok) {
+            members = (await membersRes.json()) as BoardMemberDto[];
+          }
+
+          /** Формирование сообщения */
+          let message = `*Доска:* ${board.name}\n`;
+
+          if (members.length > 0) {
+            message += `\n*Участники (${members.length}):*\n`;
+            members.forEach(m => {
+              message += `• ${m.user.name} (${m.role})\n`;
+            });
+          }
+
+          message += `\n*Задачи (${tasks.length}):*\n`;
+
+          if (tasks.length === 0) {
+            message += '— задач пока нет\n';
+          } else {
+            tasks.forEach((task, i) => {
+              message += `\n${i + 1}. ${task.title}`;
+              if (task.status) message += ` [${task.status}]`;
+              if (task.description) {
+                const short = task.description.length > 50
+                  ? task.description.slice(0, 50) + '…'
+                  : task.description;
+                message += `\n   ${short}`;
+              }
+              if (task.createdBy?.name) {
+                message += `\n   Назначено: ${task.createdBy.name}`;
+              }
+            });
+          }
+
+          await ctx.reply(message, { parse_mode: 'Markdown' });
+
+        } 
+        catch (error) {
+          console.error('[BOT] load board error:', error);
+          await ctx.reply('Ошибка при загрузке данных доски.');
+        }  
+        break;
     }
-  
-  
+  }
+
+  const board_number_delete = board_number_choose_delete.get(user_id);
+  if (board_number_delete)
+  {
+    switch (board_number_delete.step)
+    {
+      case 'number_delete':
+        const userBoards = userBoardsData.get(user_id);
+        if (!userBoards) {
+          await ctx.reply('Данные о досках не найдены. Попробуйте снова: /open_board');
+          board_number_choose_delete.delete(user_id);
+          return;
+        }
+        const selectedNumber = parseInt(text);
+        const session = loggedInUsers.get(user_id);
+      
+        if (!session?.token) {
+          await ctx.reply('Сессия истекла. Войдите снова: /log_in');
+          board_number_choose_delete.delete(user_id);
+          return;
+        }
+
+        if (isNaN(selectedNumber)) {
+          await ctx.reply('Пожалуйста, введите номер доски цифрами.');
+          return;
+        }
+
+        if (selectedNumber < 1 || selectedNumber > userBoards.size) {
+          await ctx.reply(`Номер доски должен быть от 1 до ${userBoards.size}. Попробуйте снова:`);
+          return;
+        }
+        const selectedBoard = userBoards.get(selectedNumber);
+        if (!selectedBoard) {
+          await ctx.reply('Ошибка: не удалось найти выбранную доску.');
+          board_number_choose_delete.delete(user_id);
+          userBoardsData.delete(user_id);
+          return;
+        }
+        board_number_choose_delete.delete(user_id);
+        userBoardsData.delete(user_id);
+        try {
+          const headers = {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${session.token}`,
+          };
+
+          /** 1. Доска */
+          const boardRes = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, { headers });
+          if (!boardRes.ok) {
+            await ctx.reply(`Ошибка загрузки доски (${boardRes.status})`);
+            return;
+          }
+        }
+        catch (error) {
+          console.error('[BOT] load board error:', error);
+          await ctx.reply('Ошибка при загрузке данных доски.');
+        }
+
+        await ctx.reply('Удаляю доску...');
+        try {
+          const headers = {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${session.token}`,
+          };
+
+          // DELETE запрос для удаления доски
+          const deleteRes = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, { 
+            method: 'DELETE',
+            headers: headers
+          }); 
+          if (deleteRes.ok) {
+            await ctx.reply('Доска успешно удалена!');
+          }
+        } catch (error) {
+        console.error('[BOT] delete board error:', error);
+        await ctx.reply('Ошибка при удалении доски.');
+        }
+        board_number_choose_delete.delete(user_id);
+        userBoardsData.delete(user_id);
+        break;
+    }
+  }
   return; // Важно: выходим после обработки
 });
 
