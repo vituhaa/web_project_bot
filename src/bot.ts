@@ -23,13 +23,8 @@ const loggedInUsers = new Map<number, {
   token?: string;
 }>();
 
-
-// const board_number_choose = new Map<number, {name?:string;}>();
-
-const board_number_choose = new Map<number, { 
-  boards: Array<{ id: string; name: string }>;
-  step: 'awaiting_selection';
-}>();
+const userBoardsData = new Map<number, Map<number, {id: string}>>();
+const board_number_choose = new Map<number, {step: 'number'; number?:string;}>();
 
 // команда /start
 bot.start(async (ctx) => {
@@ -95,7 +90,6 @@ bot.command('show_boards', async (ctx) => {
     boards.forEach((board, index) => {
       message += `${index + 1}. ${board.name}\n`;
     });
-
     return ctx.reply(message);
   } catch (error) {
     console.error("Error fetching boards:", error);
@@ -105,7 +99,7 @@ bot.command('show_boards', async (ctx) => {
 
 
 
-// команда /open_board - ЗАГЛУШКА
+// команда /open_board
 bot.command('open_board', async (ctx) => {
   const user_id = ctx.from.id;
   const session = loggedInUsers.get(user_id);
@@ -135,15 +129,16 @@ bot.command('open_board', async (ctx) => {
     }
 
     let message = `Ваши доски (${boards.length}):\n\n`;
+    const userBoards = new Map<number, {id: string}>();
 
     boards.forEach((board, index) => {
-      message += `${index + 1}. ${board.name}\n`;
+      const boardNumber = index + 1;
+      message += `${boardNumber}. ${board.name}\n`;
+      userBoards.set(boardNumber, {id: board.id});
     });
 
-    board_number_choose.set(user_id, {
-      boards: boards,
-      step: 'awaiting_selection'
-    });
+    userBoardsData.set(user_id, userBoards);
+    board_number_choose.set(user_id, {step:'number'});
 
     return ctx.reply(message + `Выберите номер доски, которую хотите открыть (1 - ${boards.length}): `);
   } 
@@ -291,96 +286,114 @@ bot.on('text', async (ctx) => {
   }
 
   const board_number = board_number_choose.get(user_id);
-  if (board_number && board_number.step === 'awaiting_selection') {
-    const text = ctx.message.text.trim();
-    const selectedNumber = parseInt(text);
-    const session = loggedInUsers.get(user_id);
+  if (!board_number)
+  {
+    return;
+  }
+  switch (board_number.step)
+  {
+    case 'number':
+      const userBoards = userBoardsData.get(user_id);
+      if (!userBoards) {
+        await ctx.reply('Данные о досках не найдены. Попробуйте снова: /open_board');
+        board_number_choose.delete(user_id);
+        return;
+      }
+      const selectedNumber = parseInt(text);
+      const session = loggedInUsers.get(user_id);
     
-    if (!session?.token) {
-      await ctx.reply('Сессия истекла. Войдите снова: /log_in');
-      board_number_choose.delete(user_id);
-      return;
-    }
-
-    if (isNaN(selectedNumber)) {
-      await ctx.reply('Пожалуйста, введите номер доски цифрами.');
-      return;
-    }
-
-    if (selectedNumber < 1 || selectedNumber > board_number.boards.length) {
-      await ctx.reply(`Номер доски должен быть от 1 до ${board_number.boards.length}. Попробуйте снова:`);
-      return;
-    }
-    const selectedBoard = board_number.boards[selectedNumber - 1];
-    
-    board_number_choose.delete(user_id);
-
-    try
-    {
-      await ctx.reply(`Загрузка информации о доске "${selectedBoard.name}"...`);
-
-      const response = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${session.token}`
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        await ctx.reply(`Ошибка при загрузке доски: ${response.status} ${errorText}`);
+      if (!session?.token) {
+        await ctx.reply('Сессия истекла. Войдите снова: /log_in');
+        board_number_choose.delete(user_id);
         return;
       }
 
-      const boardDetails = await response.json() as {
-        name?: string;
-        tasks?: Array<{
-          title: string;
-          description?: string;
-          status?: string;
-          assignedTo?: { name?: string };
-        }>;
-        members?: Array<{
-          role: string;
-          user: { name: string };
-        }>;
-      };
-
-      let boardMessage = `**Доска: ${boardDetails.name || 'Без названия'}**\n\n`;
-
-      if (boardDetails.tasks && Array.isArray(boardDetails.tasks)) {
-        boardMessage += `\n *Задачи в доске (${boardDetails.tasks.length}):*\n`;
-        
-        if (boardDetails.tasks.length > 0) {
-          boardDetails.tasks.forEach((task, index) => {
-            boardMessage += `\n${index + 1}. ${task.title}`;
-            
-            if (task.description)
-            {
-              const shortDesc = task.description.length > 50 ? 
-                task.description.substring(0, 50) + '...' : task.description;
-              boardMessage += `\n    ${shortDesc}`;
-            }
-            
-            if (task.assignedTo?.name) {
-              boardMessage += `\n   Назначено: ${task.assignedTo.name}`;
-            }
-          });
-        } else {
-          boardMessage += `\nЗадач пока нет.`;
-        }
+      if (isNaN(selectedNumber)) {
+        await ctx.reply('Пожалуйста, введите номер доски цифрами.');
+        return;
       }
 
-      await ctx.reply(boardMessage, { parse_mode: 'Markdown' });
-
-    } 
-    catch (error) {
-      console.error("Error loading board details:", error);
-      await ctx.reply('Произошла ошибка при загрузке информации о доске.');
-    }
+      if (selectedNumber < 1 || selectedNumber > userBoards.size) {
+        await ctx.reply(`Номер доски должен быть от 1 до ${userBoards.size}. Попробуйте снова:`);
+        return;
+      }
+      const selectedBoard = userBoards.get(selectedNumber);
+      if (!selectedBoard) {
+      await ctx.reply('Ошибка: не удалось найти выбранную доску.');
+      board_number_choose.delete(user_id);
+      userBoardsData.delete(user_id);
+      return;
+      }
     
-    return;
+      board_number_choose.delete(user_id);
+      userBoardsData.delete(user_id);
+
+      try
+      {
+        await ctx.reply(`Загрузка информации о доске `);
+
+        const response = await fetch(`${BOARDS_URL}/${selectedBoard.id}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${session.token}`
+          },
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          await ctx.reply(`Ошибка при загрузке доски: ${response.status} ${errorText}`);
+          return;
+        }
+
+        const boardDetails = await response.json() as {
+          name?: string;
+          tasks?: Array<{
+            title: string;
+            description?: string;
+            status?: string;
+            assignedTo?: { name?: string };
+          }>;
+          members?: Array<{
+            role: string;
+            user: { name: string };
+          }>;
+        };
+
+        let boardMessage = `**Доска: ${boardDetails.name || 'Без названия'}**\n\n`;
+
+        if (boardDetails.tasks && Array.isArray(boardDetails.tasks)) {
+          boardMessage += `\n *Задачи в доске (${boardDetails.tasks.length}):*\n`;
+        
+          if (boardDetails.tasks.length > 0) {
+            boardDetails.tasks.forEach((task, index) => {
+              boardMessage += `\n${index + 1}. ${task.title}`;
+            
+              if (task.description)
+              {
+                const shortDesc = task.description.length > 50 ? 
+                  task.description.substring(0, 50) + '...' : task.description;
+                boardMessage += `\n    ${shortDesc}`;
+              }
+            
+              if (task.assignedTo?.name) {
+                boardMessage += `\n   Назначено: ${task.assignedTo.name}`;
+              }
+            });
+          } else {
+            boardMessage += `\nЗадач пока нет.`;
+          }
+        }
+
+        await ctx.reply(boardMessage, { parse_mode: 'Markdown' });
+
+      } 
+      catch (error) {
+        console.error("Error loading board details:", error);
+        await ctx.reply('Произошла ошибка при загрузке информации о доске.');
+      }
+    
+      return;
   }
 });
 
