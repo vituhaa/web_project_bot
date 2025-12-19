@@ -3,6 +3,7 @@ import { Context, Telegraf } from 'telegraf';
 const bot = new Telegraf(process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN');
 const REGISTER_URL = 'http://localhost:3000/api/auth/register'
 const LOGIN_URL = 'http://localhost:3000/api/auth/login'
+const BOARDS_URL = 'http://localhost:3000/api/boards'
 
 const reg_data = new Map<number, {step: 'name' | 'password' | 'confirm';
   name?:string;
@@ -15,6 +16,10 @@ const log_data = new Map<number, {step: 'name' | 'password' | 'confirm';
   password?:string;
 }>();
 
+const loggedInUsers = new Map<number, {
+  name?:string;
+}>();
+
 
 // команда /start
 bot.start(async (ctx) => {
@@ -24,7 +29,7 @@ bot.start(async (ctx) => {
 
 // команда /help
 bot.help(async (ctx) => {
-  await ctx.reply('Доступные команды:\n/start - начать\n/help - помощь\n/registration - регистрация\n/log_in - вход');
+  await ctx.reply('Доступные команды:\n/start - начать\n/help - помощь\n/registration - регистрация\n/log_in - вход\n/show_boards - посмотреть список досок');
 });
 
 
@@ -41,6 +46,20 @@ bot.command('log_in', async (ctx) => {
   const user_id = ctx.from.id;
   log_data.set(user_id, {step: 'name'});
   await ctx.reply('Вход:\n 1. Введите ваше имя: ');
+});
+
+// команда /show_boards
+bot.command('show_boards', async (ctx) => {
+  const user_id = ctx.from.id;
+  if (loggedInUsers.has(user_id)) 
+  {
+  const user = loggedInUsers.get(user_id);
+  await ctx.reply('Вот ваши доски');
+  } 
+  else 
+  {
+    await ctx.reply('Войдите /log_in или зарегистрируйтесь /registration для просмотра: ');
+  }
 });
 
 
@@ -87,6 +106,7 @@ bot.on('text', async (ctx) => {
             {
               // const result = await response.json();
               await ctx.reply('Регистрация завершена успешно!');
+              loggedInUsers.set(user_id, {name: user_reg_data.name})
             }
             else
             {
@@ -152,6 +172,7 @@ bot.on('text', async (ctx) => {
               {
                 // const result = await response.json();
                 await ctx.reply('Вход завершен успешно!');
+                loggedInUsers.set(user_id, {name: user_log_data.name})
               }
               else
               {
