@@ -1,4 +1,5 @@
 import { Context, Telegraf } from 'telegraf';
+import "dotenv/config";
 
 const bot = new Telegraf(process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN');
 const REGISTER_URL = 'http://localhost:3000/api/auth/register'
@@ -48,13 +49,36 @@ bot.command('log_in', async (ctx) => {
   await ctx.reply('Вход:\n 1. Введите ваше имя: ');
 });
 
+
 // команда /show_boards
 bot.command('show_boards', async (ctx) => {
   const user_id = ctx.from.id;
   if (loggedInUsers.has(user_id)) 
   {
-  const user = loggedInUsers.get(user_id);
-  await ctx.reply('Вот ваши доски');
+    const user = loggedInUsers.get(user_id);
+    await ctx.reply('Вот ваши доски: \n');
+
+    const response = await fetch(BOARDS_URL, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+    });
+
+    if (!response.ok)
+    {
+      const text = await response.text().catch(() => '');
+      return ctx.reply(`Ошибка API: ${response.status} ${text}`);
+    }
+
+    type Board = { id: string; title: string };
+    const boards = (await response.json()) as Board[];
+
+    if (boards.length === 0) {
+      return ctx.reply('У вас пока нет досок.');
+    }
+
+    return ctx.reply(`Доски есть: ${boards.length}`);
   } 
   else 
   {
